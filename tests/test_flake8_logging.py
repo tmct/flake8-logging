@@ -1742,7 +1742,7 @@ class TestLOG015:
         results = run(
             """\
             import logging as logmod
-            logging = loglog.getLogger(__name__)
+            logging = logmod.getLogger(__name__)
             logging.info(...)
             """
         )
