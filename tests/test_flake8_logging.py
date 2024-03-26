@@ -1749,6 +1749,64 @@ class TestLOG015:
         assert results == []
 
 
+class TestLOG016:
+    def test_root_call(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            logger.info(...)
+            """
+        )
+        assert results == [
+            (2, 0, "LOG016 avoid logging calls on the root logger"),
+        ]
+
+    def test_root_call_alias(self):
+        results = run(
+            """\
+            import logging as loglog
+            logger = loglog.getLogger()
+            logger.info(...)
+            """
+        )
+        assert results == [
+            (2, 0, "LOG016 avoid logging calls on the root logger"),
+        ]
+
+    def test_warning_call(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            logger.warning(...)
+            """
+        )
+        assert results == [
+            (2, 0, "LOG016 avoid logging calls on the root logger"),
+        ]
+
+    def test_logger_call(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(...)
+            """
+        )
+        assert results == []
+
+    def test_logger_call_custom_name(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger("my.lovely.logger")
+            logger.info(...)
+            """
+        )
+        assert results == []
+
+
 class TestFlattenStrChain:
     def run(self, source: str) -> str | None:
         tree = ast.parse(dedent(source))
