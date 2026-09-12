@@ -3,15 +3,13 @@ from __future__ import annotations
 import ast
 import logging
 import re
-import sys
 from functools import partial
 from importlib.metadata import version
 from textwrap import dedent
 
 import pytest
 
-from flake8_logging import Plugin
-from flake8_logging import flatten_str_chain
+from flake8_logging import Plugin, flatten_str_chain
 
 
 @pytest.fixture
@@ -136,7 +134,7 @@ class TestLOG001:
     def test_direct_aliased(self):
         results = run(
             """\
-            from loggin import Logger as _Logger
+            from logging import Logger as _Logger
             _Logger("x")
             """
         )
@@ -891,12 +889,8 @@ class TestLOG009:
             """
         )
 
-        if sys.version_info >= (3, 10):
-            pos = (1, 20)
-        else:
-            pos = (1, 0)
         assert results == [
-            (*pos, "LOG009 WARN is undocumented, use WARNING instead"),
+            (1, 20, "LOG009 WARN is undocumented, use WARNING instead"),
         ]
 
     def test_import_multiline(self):
@@ -908,12 +902,8 @@ class TestLOG009:
             """
         )
 
-        if sys.version_info >= (3, 10):
-            pos = (2, 4)
-        else:
-            pos = (1, 0)
         assert results == [
-            (*pos, "LOG009 WARN is undocumented, use WARNING instead"),
+            (2, 4, "LOG009 WARN is undocumented, use WARNING instead"),
         ]
 
     def test_import_alias(self):
@@ -923,12 +913,8 @@ class TestLOG009:
             """
         )
 
-        if sys.version_info >= (3, 10):
-            pos = (1, 20)
-        else:
-            pos = (1, 0)
         assert results == [
-            (*pos, "LOG009 WARN is undocumented, use WARNING instead"),
+            (1, 20, "LOG009 WARN is undocumented, use WARNING instead"),
         ]
 
 

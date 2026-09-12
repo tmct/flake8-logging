@@ -2,7 +2,7 @@
 flake8-logging
 ==============
 
-.. image:: https://img.shields.io/github/actions/workflow/status/adamchainz/flake8-logging/main.yml?branch=main&style=for-the-badge
+.. image:: https://img.shields.io/github/actions/workflow/status/adamchainz/flake8-logging/main.yml.svg?branch=main&style=for-the-badge
    :target: https://github.com/adamchainz/flake8-logging/actions?workflow=CI
 
 .. image:: https://img.shields.io/badge/Coverage-100%25-success?style=for-the-badge
@@ -25,7 +25,7 @@ For a brief overview and background, see `the introductory blog post <https://ad
 Requirements
 ============
 
-Python 3.8 to 3.12 supported.
+Python 3.10 to 3.15 supported.
 
 Installation
 ============
@@ -100,7 +100,7 @@ __ https://docs.python.org/3/reference/import.html?#name__
 
 This rule detects probably-mistaken usage of similar module-level dunder constants:
 
-* |__cached__|__ - the pathname of the module’s compiled versio˜, such as ``camelot/__pycache__/spam.cpython-311.pyc``.
+* |__cached__|__ - the pathname of the module’s compiled version˜, such as ``camelot/__pycache__/spam.cpython-311.pyc``.
 
   .. |__cached__| replace:: ``__cached__``
   __ https://docs.python.org/3/reference/import.html?#cached__
@@ -496,7 +496,7 @@ When using named ``%``-style formatting, if the message references a missing key
 
 .. code-block:: pycon
 
-    >>> logging.error("Hi %(name)s", {"nam": "hacker"})
+    >>> logging.error("Hi %(name)s", {"nom": "hacker"})
     --- Logging error ---
     Traceback (most recent call last):
       File "/.../logging/__init__.py", line 1160, in emit
@@ -511,7 +511,7 @@ When using named ``%``-style formatting, if the message references a missing key
     Call stack:
       File "<stdin>", line 1, in <module>
     Message: 'Hi %(name)s'
-    Arguments: {'nam': 'hacker'}
+    Arguments: {'nom': 'hacker'}
 
 This will only happen when the logger is enabled since loggers don’t perform string formatting when disabled.
 Thus a configuration change can reveal such errors.

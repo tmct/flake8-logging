@@ -1,81 +1,122 @@
 [build-system]
-build-backend = "setuptools.build_meta"
+build-backend = "uv_build"
 requires = [
-  "setuptools",
+  "uv-build>=0.12.1,<0.13",
 ]
 
 [project]
 name = "flake8-logging"
-version = "1.6.0"
+version = "1.8.0"
 description = "A Flake8 plugin that checks for issues using the standard library logging module."
-readme = {file = "README.rst", content-type = "text/x-rst"}
+readme = "README.rst"
 keywords = [
   "flake8",
 ]
-license = {text = "MIT"}
-authors = [{name = "Adam Johnson", email = "me@adamj.eu"}]
-requires-python = ">=3.8"
+license = "MIT"
+license-files = [ "LICENSE" ]
+authors = [
+  { name = "Adam Johnson", email = "me@adamj.eu" },
+]
+requires-python = ">=3.10"
 classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Framework :: Flake8",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: MIT License",
   "Natural Language :: English",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.8",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
   "Typing :: Typed",
 ]
 dependencies = [
-  "flake8!=3.2.0,>=3",
+  "flake8>=3,!=3.2",
 ]
-urls = {Changelog = "https://github.com/adamchainz/flake8-logging/blob/main/CHANGELOG.rst",Funding = "https://adamj.eu/books/",Repository = "https://github.com/adamchainz/flake8-logging"}
-[project.entry-points."flake8.extension"]
-L = "flake8_logging:Plugin"
+urls = { Changelog = "https://github.com/adamchainz/flake8-logging/blob/main/CHANGELOG.rst", Funding = "https://adamj.eu/books/", Repository = "https://github.com/adamchainz/flake8-logging" }
+entry-points."flake8.extension".L = "flake8_logging:Plugin"
 
-[tool.isort]
-add_imports = [
-    "from __future__ import annotations"
-]
-force_single_line = true
-profile = "black"
-
-[tool.pytest.ini_options]
-addopts = """\
-    --strict-config
-    --strict-markers
-    """
-
-[tool.coverage.run]
-branch = true
-parallel = true
-source = [
-    "flake8_logging",
-    "tests",
+[dependency-groups]
+test = [
+  "coverage[toml]",
+  "flake8",
+  "pytest>=9",
+  "pytest-flake8-path",
+  "pytest-randomly",
 ]
 
-[tool.coverage.paths]
-source = [
-    "src",
-    ".tox/**/site-packages",
+[tool.ruff]
+lint.select = [
+  # flake8-bugbear
+  "B",
+  # flake8-comprehensions
+  "C4",
+  # pycodestyle
+  "E",
+  # Pyflakes errors
+  "F",
+  # isort
+  "I",
+  # flake8-simplify
+  "SIM",
+  # flake8-tidy-imports
+  "TID",
+  # pyupgrade
+  "UP",
+  # Pyflakes warnings
+  "W",
 ]
+lint.ignore = [
+  # flake8-bugbear opinionated rules
+  "B9",
+  # line-too-long
+  "E501",
+  # suppressible-exception
+  "SIM105",
+  # if-else-block-instead-of-if-exp
+  "SIM108",
+]
+lint.extend-safe-fixes = [
+  # non-pep585-annotation
+  "UP006",
+]
+lint.isort.required-imports = [ "from __future__ import annotations" ]
 
-[tool.coverage.report]
-show_missing = true
+[tool.pyproject-fmt]
+max_supported_python = "3.15"
 
 [tool.mypy]
 mypy_path = "src/"
 namespace_packages = false
-show_error_codes = true
-strict = true
 warn_unreachable = true
+enable_error_code = [
+  "ignore-without-code",
+  "redundant-expr",
+  "truthy-bool",
+]
+strict = true
+overrides = [ { module = "tests.*", allow_untyped_defs = true } ]
 
-[[tool.mypy.overrides]]
-module = "tests.*"
-allow_untyped_defs = true
+[tool.pytest]
+strict = true
+
+[tool.coverage]
+run.source = [
+  "flake8_logging",
+  "tests",
+]
+run.branch = true
+run.data_file = ".coverage/cov"
+run.parallel = true
+paths.source = [
+  "src",
+  ".tox/**/site-packages",
+]
+report.skip_covered = true
+report.skip_empty = true
+report.show_missing = true
 
 [tool.rstcheck]
 report_level = "ERROR"

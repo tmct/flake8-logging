@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import ast
 import re
-import sys
-from functools import lru_cache
+from collections.abc import Generator, Sequence
+from functools import cache
 from importlib.metadata import version
-from typing import Any
-from typing import Generator
-from typing import Sequence
-from typing import cast
+from typing import Any, cast
 
 
 class Plugin:
@@ -18,7 +15,7 @@ class Plugin:
     def __init__(self, tree: ast.AST) -> None:
         self._tree = tree
 
-    def run(self) -> Generator[tuple[int, int, str, type[Any]], None, None]:
+    def run(self) -> Generator[tuple[int, int, str, type[Any]]]:
         visitor = Visitor()
         visitor.visit(self._tree)
 
@@ -68,7 +65,7 @@ logrecord_attributes = frozenset(
 )
 
 
-@lru_cache(maxsize=None)
+@cache
 def modpos_placeholder_re() -> re.Pattern[str]:
     # https://docs.python.org/3/library/stdtypes.html#printf-style-string-formatting
     return re.compile(
@@ -89,7 +86,7 @@ def modpos_placeholder_re() -> re.Pattern[str]:
     )
 
 
-@lru_cache(maxsize=None)
+@cache
 def modnamed_placeholder_re() -> re.Pattern[str]:
     # https://docs.python.org/3/library/stdtypes.html#printf-style-string-formatting
     return re.compile(
@@ -154,12 +151,8 @@ class Visitor(ast.NodeVisitor):
         if node.module == "logging":
             for alias in node.names:
                 if alias.name == "WARN":
-                    if sys.version_info >= (3, 10):
-                        lineno = alias.lineno
-                        col_offset = alias.col_offset
-                    else:
-                        lineno = node.lineno
-                        col_offset = node.col_offset
+                    lineno = alias.lineno
+                    col_offset = alias.col_offset
                     self.errors.append((lineno, col_offset, LOG009))
                 if not alias.asname:
                     self._from_imports[alias.name] = node.module
@@ -250,13 +243,13 @@ class Visitor(ast.NodeVisitor):
                 self.errors.append((node.lineno, node.col_offset, LOG008))
 
             # LOG003
-            extra_keys: Sequence[tuple[str, ast.AST]] = ()
+            extra_keys: Sequence[tuple[str, ast.Constant | ast.keyword]] = ()
             if any((extra_node := kw).arg == "extra" for kw in node.keywords):
                 if isinstance(extra_node.value, ast.Dict):
                     extra_keys = [
                         (k.value, k)
                         for k in extra_node.value.keys
-                        if isinstance(k, ast.Constant)
+                        if isinstance(k, ast.Constant) and isinstance(k.value, str)
                     ]
                 elif (
                     isinstance(extra_node.value, ast.Call)
@@ -271,16 +264,10 @@ class Visitor(ast.NodeVisitor):
 
             for key, key_node in extra_keys:
                 if key in logrecord_attributes:
-                    if isinstance(key_node, ast.keyword):
-                        lineno, col_offset = keyword_pos(key_node)
-                    else:
-                        lineno = key_node.lineno
-                        col_offset = key_node.col_offset
-
                     self.errors.append(
                         (
-                            lineno,
-                            col_offset,
+                            key_node.lineno,
+                            key_node.col_offset,
                             LOG003.format(repr(key)),
                         )
                     )
@@ -303,7 +290,7 @@ class Visitor(ast.NodeVisitor):
                         and exc_info.value.id == exc_handler.name
                     ):
                         self.errors.append(
-                            (*keyword_pos(exc_info), LOG006),
+                            (exc_info.lineno, exc_info.col_offset, LOG006),
                         )
 
                     # LOG007
@@ -312,7 +299,7 @@ class Visitor(ast.NodeVisitor):
                         and not exc_info.value.value
                     ):
                         self.errors.append(
-                            (*keyword_pos(exc_info), LOG007),
+                            (exc_info.lineno, exc_info.col_offset, LOG007),
                         )
 
             # LOG005
@@ -322,9 +309,7 @@ class Visitor(ast.NodeVisitor):
                     if (
                         isinstance(exc_info.value, ast.Constant)
                         and exc_info.value.value
-                    ):
-                        rewritable = True
-                    elif (
+                    ) or (
                         isinstance(exc_info.value, ast.Name)
                         and exc_info.value.id == exc_handler.name
                     ):
@@ -344,7 +329,7 @@ class Visitor(ast.NodeVisitor):
                 and exc_info.value.value
             ):
                 self.errors.append(
-                    (*keyword_pos(exc_info), LOG014),
+                    (exc_info.lineno, exc_info.col_offset, LOG014),
                 )
 
             # LOG010
@@ -419,7 +404,7 @@ class Visitor(ast.NodeVisitor):
                 break
         return None
 
-    def _check_msg_and_args(self, node: ast.Call, msg_arg: ast.AST, msg: str) -> None:
+    def _check_msg_and_args(self, node: ast.Call, msg_arg: ast.expr, msg: str) -> None:
         assert isinstance(node.func, ast.Attribute)
         if (
             (
@@ -427,8 +412,10 @@ class Visitor(ast.NodeVisitor):
                 or (node.func.attr == "log" and (dict_idx := 2))
             )
             and len(node.args) == dict_idx + 1
-            and (dict_node := node.args[dict_idx])
-            and isinstance(dict_node, ast.Dict)
+            and isinstance(
+                (dict_node := node.args[dict_idx]),
+                ast.Dict,
+            )
             and all(
                 isinstance(k, ast.Constant) and isinstance(k.value, str)
                 for k in dict_node.keys
@@ -489,17 +476,6 @@ class Visitor(ast.NodeVisitor):
                 )
             )
             return
-
-
-def keyword_pos(node: ast.keyword) -> tuple[int, int]:
-    if sys.version_info >= (3, 9):
-        return (node.lineno, node.col_offset)
-    else:
-        # Educated guess
-        return (
-            node.value.lineno,
-            max(0, node.value.col_offset - 1 - len(node.arg)),
-        )
 
 
 def is_add_chain_with_non_str(node: ast.BinOp) -> bool:

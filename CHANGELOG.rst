@@ -2,6 +2,29 @@
 Changelog
 =========
 
+Unreleased
+----------
+
+* Support Python 3.15.
+
+* Switch package build backend from setuptools to `uv_build <https://docs.astral.sh/uv/concepts/build-backend/>`__.
+  This makes builds with uv about nine times faster, since uv runs the backend natively, without creating a build environment or spawning a Python process.
+  Additionally, source distributions no longer include test files, which setuptools previously included incompletely, missing the files needed to actually run them.
+
+* Drop Python 3.9 support.
+
+1.8.0 (2025-09-09)
+------------------
+
+* Support Python 3.14.
+
+1.7.0 (2024-10-27)
+------------------
+
+* Drop Python 3.8 support.
+
+* Support Python 3.13.
+
 1.6.0 (2024-03-20)
 ------------------
 
@@ -49,7 +72,7 @@ Changelog
 
 * LOG001: Avoid detecting inside function definitions when using ``Logger`` directly.
 
-* Add rule LOG005 that recomends ``exception()`` over ``error()`` within ``except`` clauses.
+* Add rule LOG005 that recommends ``exception()`` over ``error()`` within ``except`` clauses.
 
 * Add rule LOG006 that detects redundant ``exc_info`` arguments in calls to ``exception()``.
 
