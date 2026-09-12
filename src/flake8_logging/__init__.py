@@ -126,6 +126,7 @@ LOG012 = "LOG012 formatting error: {n} {style} placeholder{ns} but {m} argument{
 LOG013 = "LOG013 formatting error: {mistake} key{ns}: {keys}"
 LOG014 = "LOG014 avoid exc_info=True outside of exception handlers"
 LOG015 = "LOG015 avoid logging calls on the root logger"
+LOG016 = "LOG016 avoid implicitly getting the root logger"
 
 
 class Visitor(ast.NodeVisitor):
@@ -210,6 +211,9 @@ class Visitor(ast.NodeVisitor):
             and node.func.id == "getLogger"
             and self._from_imports.get("getLogger") == "logging"
         ):
+            if not node.args and not node.keywords:
+                self.errors.append((node.lineno, node.col_offset, LOG016))
+
             if (
                 len(self._stack) >= 2
                 and isinstance(assign := self._stack[-2], ast.Assign)

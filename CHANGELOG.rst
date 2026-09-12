@@ -5,6 +5,9 @@ Changelog
 Unreleased
 ----------
 
+* Add rule LOG016 that detects calls to ``logging.getLogger()`` without arguments.
+  Use ``logging.getLogger(__name__)`` for a named logger or ``logging.getLogger(None)`` to explicitly get the root logger.
+
 * Support Python 3.15.
 
 * Switch package build backend from setuptools to `uv_build <https://docs.astral.sh/uv/concepts/build-backend/>`__.

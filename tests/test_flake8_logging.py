@@ -48,6 +48,21 @@ class TestIntegration:
             "./example.py:2:1: LOG001 use logging.getLogger() to instantiate loggers"
         ]
 
+    def test_log016(self, flake8_path):
+        (flake8_path / "example.py").write_text(
+            "import logging\nlogger = logging.getLogger()\n"
+        )
+
+        result = flake8_path.run_flake8()
+
+        assert result.out_lines == [
+            "./example.py:2:10: LOG016 avoid implicitly getting the root logger"
+        ]
+
+        result = flake8_path.run_flake8(["--extend-ignore=LOG016"])
+
+        assert result.out_lines == []
+
 
 def run(source: str, ignore: tuple[str, ...] = ()) -> list[tuple[int, int, str]]:
     tree = ast.parse(dedent(source))
@@ -1733,6 +1748,61 @@ class TestLOG015:
             """
         )
         assert results == []
+
+
+class TestLOG016:
+    @pytest.mark.parametrize(
+        ("import_statement", "get_logger"),
+        [
+            ("import logging", "logging.getLogger"),
+            ("import logging as lm", "lm.getLogger"),
+            ("from logging import getLogger", "getLogger"),
+        ],
+    )
+    def test_no_arguments(self, import_statement, get_logger):
+        results = run(f"{import_statement}\nlogger = {get_logger}()")
+
+        assert results == [(2, 9, "LOG016 avoid implicitly getting the root logger")]
+
+    @pytest.mark.parametrize(
+        "arguments",
+        [
+            "__name__",
+            "None",
+            '"example"',
+            "name=__name__",
+            "name=None",
+            "*args",
+            "**kwargs",
+        ],
+    )
+    def test_explicit_arguments(self, arguments):
+        results = run(f"import logging\nlogger = logging.getLogger({arguments})")
+
+        assert results == []
+
+    @pytest.mark.parametrize("definition", ["def", "async def"])
+    def test_in_function(self, definition):
+        results = run(
+            f"""\
+            import logging
+            {definition} configure_logging():
+                root_logger = logging.getLogger()
+            """
+        )
+
+        assert results == [(3, 18, "LOG016 avoid implicitly getting the root logger")]
+
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "import our_logging\nour_logging.getLogger()",
+            "from our_logging import getLogger\ngetLogger()",
+            "getLogger()",
+        ],
+    )
+    def test_unrelated(self, source):
+        assert run(source) == []
 
 
 class TestFlattenStrChain:

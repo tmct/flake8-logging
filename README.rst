@@ -601,3 +601,37 @@ Corrected:
     logger = logging.getLogger(__name__)
 
     logger.info("hello world")
+
+LOG016 avoid implicitly getting the root logger
+------------------------------------------------
+
+Calling ``logging.getLogger()`` without arguments returns the root logger.
+This is often a mistake caused by forgetting to pass ``__name__``, leaving log messages without their module’s name.
+
+This rule detects calls to ``getLogger()`` without arguments, including inside functions.
+Pass ``__name__`` to get a logger named after the current module.
+If you need the root logger, for example to configure its handlers, pass ``None`` explicitly.
+
+Failing example:
+
+.. code-block:: python
+
+    import logging
+
+    logger = logging.getLogger()
+
+Corrected:
+
+.. code-block:: python
+
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+Or, to explicitly get the root logger:
+
+.. code-block:: python
+
+    import logging
+
+    root_logger = logging.getLogger(None)
