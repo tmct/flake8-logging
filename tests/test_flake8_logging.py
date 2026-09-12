@@ -50,13 +50,13 @@ class TestIntegration:
 
     def test_log016(self, flake8_path):
         (flake8_path / "example.py").write_text(
-            "import logging\nlogger = logging.getLogger()\n"
+            'import logging\nlogger = logging.getLogger()\nlogger.info("Hello")\n'
         )
 
         result = flake8_path.run_flake8()
 
         assert result.out_lines == [
-            "./example.py:2:10: LOG016 avoid implicitly getting the root logger"
+            "./example.py:3:1: LOG016 avoid logging through an implicitly obtained root logger"
         ]
 
         result = flake8_path.run_flake8(["--extend-ignore=LOG016"])
@@ -1760,9 +1760,11 @@ class TestLOG016:
         ],
     )
     def test_no_arguments(self, import_statement, get_logger):
-        results = run(f"{import_statement}\nlogger = {get_logger}()")
+        results = run(f"{import_statement}\nlogger = {get_logger}()\nlogger.info(...)")
 
-        assert results == [(2, 9, "LOG016 avoid implicitly getting the root logger")]
+        assert results == [
+            (3, 0, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
 
     @pytest.mark.parametrize(
         "arguments",
@@ -1777,7 +1779,9 @@ class TestLOG016:
         ],
     )
     def test_explicit_arguments(self, arguments):
-        results = run(f"import logging\nlogger = logging.getLogger({arguments})")
+        results = run(
+            f"import logging\nlogger = logging.getLogger({arguments})\nlogger.info(...)"
+        )
 
         assert results == []
 
@@ -1788,10 +1792,14 @@ class TestLOG016:
             import logging
             {definition} configure_logging():
                 root_logger = logging.getLogger()
+                root_logger.addHandler(handler)
+                root_logger.info("Hello")
             """
         )
 
-        assert results == [(3, 18, "LOG016 avoid implicitly getting the root logger")]
+        assert results == [
+            (5, 4, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
 
     @pytest.mark.parametrize(
         "source",
@@ -1813,7 +1821,7 @@ class TestLOG016:
             """
         )
         assert results == [
-            (2, 9, "LOG016 avoid implicitly getting the root logger"),
+            (3, 0, "LOG016 avoid logging through an implicitly obtained root logger"),
         ]
 
     def test_root_call_alias(self):
@@ -1825,7 +1833,7 @@ class TestLOG016:
             """
         )
         assert results == [
-            (2, 9, "LOG016 avoid implicitly getting the root logger"),
+            (3, 0, "LOG016 avoid logging through an implicitly obtained root logger"),
         ]
 
     def test_warning_call(self):
@@ -1837,7 +1845,7 @@ class TestLOG016:
             """
         )
         assert results == [
-            (2, 9, "LOG016 avoid implicitly getting the root logger"),
+            (3, 0, "LOG016 avoid logging through an implicitly obtained root logger"),
         ]
 
     def test_logger_call(self):
@@ -1859,6 +1867,330 @@ class TestLOG016:
             """
         )
         assert results == []
+
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            "pass",
+            "root.addHandler(handler)",
+            "root.removeHandler(handler)",
+            "root.setLevel(logging.DEBUG)",
+            "print(root.handlers)",
+            "root.isEnabledFor(logging.INFO)",
+        ],
+    )
+    def test_configuration_only(self, operation):
+        assert (
+            run(
+                f"import logging\ndef configure():\n    root = logging.getLogger()\n    {operation}"
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "method",
+        ["debug", "info", "warn", "warning", "error", "critical", "log", "exception"],
+    )
+    def test_logging_methods(self, method):
+        results = run(
+            f"import logging\ndef work():\n    root = logging.getLogger()\n    root.{method}(...)"
+        )
+        assert results == [
+            (4, 4, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    @pytest.mark.parametrize(
+        "initialization",
+        [
+            "root = logging.getLogger()",
+            "root: logging.Logger = logging.getLogger()",
+            "root = other = logging.getLogger()",
+            "original = logging.getLogger()\n    root = original",
+            "get_logger = logging.getLogger\n    root = get_logger()",
+        ],
+    )
+    def test_assignment_forms(self, initialization):
+        results = run(
+            f"import logging\ndef work():\n    {initialization}\n    root.info(...)"
+        )
+        assert results == [
+            (
+                4 + initialization.count("\n"),
+                4,
+                "LOG016 avoid logging through an implicitly obtained root logger",
+            )
+        ]
+
+    def test_local_aliased_import(self):
+        assert run(
+            """\
+            def work():
+                from logging import getLogger as get_logger
+                root = get_logger()
+                root.info(...)
+            """
+        ) == [(4, 4, "LOG016 avoid logging through an implicitly obtained root logger")]
+
+    @pytest.mark.parametrize(
+        "replacement",
+        [
+            "root = logging.getLogger(__name__)",
+            "root: object = other",
+            "root, other = pair",
+            "del root",
+            "root += other",
+            "root := other",
+            "from elsewhere import root",
+            "import elsewhere as root",
+            "def root():\n        pass",
+            "class root:\n        pass",
+            "if condition:\n        root = other",
+            "for root in objects:\n        pass",
+            "with context() as root:\n        pass",
+            "match value:\n        case {'root': root}:\n            pass",
+        ],
+    )
+    def test_reassignment(self, replacement):
+        if replacement == "root := other":
+            replacement = "(root := other)"
+        assert (
+            run(
+                f"import logging\ndef work():\n    root = logging.getLogger()\n    {replacement}\n    root.info(...)"
+            )
+            == []
+        )
+
+    def test_bare_annotation_preserves_binding(self):
+        assert run(
+            """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                root: logging.Logger
+                root.info(...)
+            """
+        ) == [(5, 4, "LOG016 avoid logging through an implicitly obtained root logger")]
+
+    def test_alias_survives_original_reassignment(self):
+        assert run(
+            """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                other = root
+                root = logging.getLogger(__name__)
+                root.info(...)
+                other.info(...)
+            """
+        ) == [(7, 4, "LOG016 avoid logging through an implicitly obtained root logger")]
+
+    def test_multiple_calls(self):
+        assert run(
+            """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                root.info(...)
+                root.addHandler(handler)
+                root.warning(...)
+            """
+        ) == [
+            (4, 4, "LOG016 avoid logging through an implicitly obtained root logger"),
+            (6, 4, "LOG016 avoid logging through an implicitly obtained root logger"),
+        ]
+
+    def test_separate_functions(self):
+        assert (
+            run(
+                """\
+            import logging
+            def configure():
+                root = logging.getLogger()
+                root.setLevel(logging.INFO)
+            def work(root):
+                root.info(...)
+            """
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize("argument", ["logging", "getLogger"])
+    def test_shadowed_import(self, argument):
+        factory = "logging.getLogger" if argument == "logging" else "getLogger"
+        assert (
+            run(
+                f"import logging\nfrom logging import getLogger\ndef work({argument}):\n    root = {factory}()\n    root.info(...)"
+            )
+            == []
+        )
+
+    def test_later_local_binding_shadows_module_import(self):
+        assert (
+            run(
+                """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                root.info(...)
+                logging = other
+            """
+            )
+            == []
+        )
+
+    def test_nested_function_does_not_inherit_root(self):
+        assert run(
+            """\
+            import logging
+            def outer():
+                root = logging.getLogger()
+                def inner(root):
+                    root.info(...)
+                root.info(...)
+            """
+        ) == [(6, 4, "LOG016 avoid logging through an implicitly obtained root logger")]
+
+    @pytest.mark.parametrize(
+        "expression",
+        [
+            "lambda root: root.info(...)",
+            "[root.info(...) for root in others]",
+            "(root.info(...) for root in others)",
+            "{root.info(...) for root in others}",
+            "{root: root.info(...) for root in others}",
+        ],
+    )
+    def test_separate_expression_scopes(self, expression):
+        assert (
+            run(
+                f"import logging\ndef work():\n    root = logging.getLogger()\n    {expression}"
+            )
+            == []
+        )
+
+    def test_conditional_assignment_is_not_definite(self):
+        assert (
+            run(
+                """\
+            import logging
+            def work():
+                if condition:
+                    root = logging.getLogger()
+                else:
+                    root = other
+                root.info(...)
+            """
+            )
+            == []
+        )
+
+    def test_no_rebinding_after_conditional(self):
+        assert run(
+            """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                if condition:
+                    configure()
+                root.info(...)
+            """
+        ) == [(6, 4, "LOG016 avoid logging through an implicitly obtained root logger")]
+
+    def test_no_logging_after_return(self):
+        assert (
+            run(
+                """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                return root
+                root.info(...)
+            """
+            )
+            == []
+        )
+
+    def test_walrus_does_not_leave_stale_binding(self):
+        assert (
+            run(
+                """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                ((root := other), root.info(...))
+            """
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize("declaration", ["global root", "nonlocal root"])
+    def test_external_bindings_are_not_inherited(self, declaration):
+        assert (
+            run(
+                f"""\
+            import logging
+            def outer():
+                root = logging.getLogger()
+                def inner():
+                    {declaration}
+                    root.info(...)
+            """
+            )
+            == []
+        )
+
+    def test_match_mapping_rebinds_root(self):
+        assert (
+            run(
+                """\
+            import logging
+            def work():
+                root = logging.getLogger()
+                match value:
+                    case {**root}:
+                        pass
+                root.info(...)
+            """
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        "import_statement",
+        ["from elsewhere import *", "if condition:\n    from elsewhere import *"],
+    )
+    def test_wildcard_import_invalidates_bindings(self, import_statement):
+        assert (
+            run(
+                f"import logging\nroot = logging.getLogger()\n{import_statement}\nroot.info(...)"
+            )
+            == []
+        )
+
+    def test_default_expression_rebinds_outer_root(self):
+        assert (
+            run(
+                """\
+            import logging
+            root = logging.getLogger()
+            def work(value=(root := other)):
+                pass
+            root.info(...)
+            """
+            )
+            == []
+        )
+
+    def test_function_defaults_and_decorators(self):
+        assert run(
+            """\
+            import logging
+            @decorate
+            def work(value=None, *, required, option=None):
+                root = logging.getLogger()
+                root.info(...)
+            """
+        ) == [(5, 4, "LOG016 avoid logging through an implicitly obtained root logger")]
 
 
 class TestFlattenStrChain:

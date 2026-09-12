@@ -5,8 +5,9 @@ Changelog
 Unreleased
 ----------
 
-* Add rule LOG016 that detects calls to ``logging.getLogger()`` without arguments.
-  Use ``logging.getLogger(__name__)`` for a named logger or ``logging.getLogger(None)`` to explicitly get the root logger.
+* Add an experimental LOG016 rule that detects logging through variables assigned from argument-free ``logging.getLogger()`` calls in the same scope.
+  Getting the root logger solely to inspect or configure it is allowed.
+  Use ``logging.getLogger(__name__)`` for logging, or ``logging.getLogger(None)`` to explicitly opt in to root logging.
 
 * Support Python 3.15.
 

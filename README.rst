@@ -602,15 +602,17 @@ Corrected:
 
     logger.info("hello world")
 
-LOG016 avoid implicitly getting the root logger
-------------------------------------------------
+LOG016 avoid logging through an implicitly obtained root logger
+----------------------------------------------------------------
 
 Calling ``logging.getLogger()`` without arguments returns the root logger.
-This is often a mistake caused by forgetting to pass ``__name__``, leaving log messages without their module’s name.
+Getting that logger to inspect it or configure its handlers is legitimate.
+Logging through it, however, leaves messages without a module-specific logger name.
 
-This rule detects calls to ``getLogger()`` without arguments, including inside functions.
-Pass ``__name__`` to get a logger named after the current module.
-If you need the root logger, for example to configure its handlers, pass ``None`` explicitly.
+This experimental rule detects a variable assigned from ``logging.getLogger()`` and subsequently used to log in the same module or function body, including async functions.
+It reports the logging call, not the assignment.
+Simple aliases, chained assignments, and annotated assignments are supported.
+Reassigning a variable to a named logger or an unknown value stops tracking it as a root logger.
 
 Failing example:
 
@@ -618,7 +620,11 @@ Failing example:
 
     import logging
 
-    logger = logging.getLogger()
+    def work():
+        logger = logging.getLogger()
+        logger.addHandler(handler)  # Allowed: configuration.
+        prepare_work()
+        logger.info("Starting work")  # LOG016.
 
 Corrected:
 
@@ -626,12 +632,15 @@ Corrected:
 
     import logging
 
-    logger = logging.getLogger(__name__)
+    def work():
+        root_logger = logging.getLogger()
+        root_logger.addHandler(handler)
+        logger = logging.getLogger(__name__)
+        logger.info("Starting work")
 
-Or, to explicitly get the root logger:
+If logging through the root logger is intentional, ``logging.getLogger(None)`` remains an explicit opt-in that this rule allows.
 
-.. code-block:: python
-
-    import logging
-
-    root_logger = logging.getLogger(None)
+The analysis is deliberately limited to straightforward cases.
+It does not follow logger values between scopes, through function calls, or through attributes and containers.
+It skips statements inside control-flow blocks (such as ``if``, ``try``, and loops), class bodies, lambdas, and comprehensions.
+Assignments in skipped blocks invalidate tracked bindings, so uncertain cases can be missed rather than reported incorrectly.
