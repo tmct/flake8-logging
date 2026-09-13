@@ -609,13 +609,10 @@ Calling ``logging.getLogger()`` without arguments returns the root logger.
 Getting that logger to inspect it or configure its handlers is legitimate.
 Logging through it, however, leaves messages without a module-specific logger name.
 
-This experimental rule detects a variable assigned from ``logging.getLogger()`` and subsequently used to log.
-It follows lexical bindings within one file: module code, functions, methods, nested functions, class bodies, lambdas, and comprehensions.
-This includes async forms and definitions inside conditional, loop, and exception-handling blocks.
-It reports the logging call, not the assignment.
-Simple aliases, chained and annotated assignments, assignment expressions, and aliases of logging methods are supported.
-Direct calls such as ``logging.getLogger().info(...)`` are also detected.
-Reassigning a variable to a named logger or an unknown value stops tracking it as a root logger.
+This rule detects direct module-level assignments such as ``logger = logging.getLogger()``, then reports later logging calls on that variable.
+It checks uses in functions, methods, nested scopes, class bodies, lambdas, and comprehensions, including code inside branches, loops, and exception handlers.
+Local bindings that shadow the module variable are excluded; class attributes do not shadow a bare module name inside a method.
+Aliased logging imports and annotated or chained assignments are supported.
 
 Failing example:
 
@@ -656,32 +653,6 @@ Getting the root logger solely to inspect it or configure its handlers is allowe
 
 If logging through the root logger is intentional, ``logging.getLogger(None)`` remains an explicit opt-in that this rule allows.
 
-A locally created root logger captured by a nested function is also detected:
-
-.. code-block:: python
-
-    import logging
-
-    def make_worker():
-        logger = logging.getLogger()
-
-        def work():
-            logger.info("Starting work")  # LOG016.
-
-        return work
-
-The analysis respects Python’s lexical scopes.
-Parameters, local assignments, imports, exception captures, and pattern captures shadow enclosing names.
-Class attributes do not form an enclosing namespace for methods, and comprehension targets do not leak into surrounding scopes.
-Read-only ``global`` and ``nonlocal`` references resolve to the corresponding enclosing binding.
-
-The analysis is deliberately conservative about execution order.
-Immediate code uses the current bindings, while deferred functions, lambdas, and generator bodies inherit only bindings with a single unambiguous assignment in the enclosing scope.
-Multiple assignments, deletion, uncertain control flow, wildcard imports, and writes through ``global`` or ``nonlocal`` can prevent a binding from being tracked into deferred code.
-Branches keep a known value only when their results agree; loop and exception paths discard values that could have changed.
-These choices may miss some logging calls rather than assume a logger’s identity when it is uncertain.
-
-The boundary is one file and lexical bindings.
-The rule does not infer arguments or return values across arbitrary function calls, follow logger values imported from another file, or track values stored in object attributes and containers.
-It does not execute code or evaluate lazy type annotations and type aliases.
-Getting an explicit root logger with ``getLogger(None)`` remains allowed in every scope.
+The rule deliberately handles simple module-level declarations, without following values through execution paths.
+Variables assigned more than once at module level are skipped.
+Loggers created inside functions or conditional blocks, aliases of logger variables or logging methods, and values passed through calls, imports from other files, attributes, or containers are not tracked.

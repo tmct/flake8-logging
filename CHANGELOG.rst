@@ -5,9 +5,8 @@ Changelog
 Unreleased
 ----------
 
-* Add an experimental LOG016 rule that detects logging through variables assigned from argument-free ``logging.getLogger()`` calls.
-  Track lexical bindings within one file, including module code, functions and methods, nested closures, class bodies, lambdas, comprehensions, and definitions inside control flow.
-  Respect local shadowing and read-only ``global``/``nonlocal`` declarations, and conservatively skip uncertain captured bindings.
+* Add rule LOG016 that detects logging through variables directly assigned from argument-free ``logging.getLogger()`` calls at module level.
+  Check later uses across scopes while respecting local shadowing, without tracking reassignment or values passed around.
   Getting the root logger solely to inspect or configure it is allowed.
   Use ``logging.getLogger(__name__)`` for logging, or ``logging.getLogger(None)`` to explicitly opt in to root logging.
 
