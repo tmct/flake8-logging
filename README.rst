@@ -609,7 +609,8 @@ Calling ``logging.getLogger()`` without arguments returns the root logger.
 Getting that logger to inspect it or configure its handlers is legitimate.
 Logging through it, however, leaves messages without a module-specific logger name.
 
-This experimental rule detects a variable assigned from ``logging.getLogger()`` and subsequently used to log in the same module or function body, including async functions.
+This experimental rule detects a variable assigned from ``logging.getLogger()`` and subsequently used to log.
+It checks straightforward uses within one scope, and module-level loggers used in functions and class methods, including async functions, static methods, and class methods.
 It reports the logging call, not the assignment.
 Simple aliases, chained assignments, and annotated assignments are supported.
 Reassigning a variable to a named logger or an unknown value stops tracking it as a root logger.
@@ -620,11 +621,12 @@ Failing example:
 
     import logging
 
-    def work():
-        logger = logging.getLogger()
-        logger.addHandler(handler)  # Allowed: configuration.
-        prepare_work()
-        logger.info("Starting work")  # LOG016.
+    logger = logging.getLogger()
+
+    class Worker:
+        def run(self):
+            if ready:
+                logger.info("Starting work")  # LOG016.
 
 Corrected:
 
@@ -632,15 +634,33 @@ Corrected:
 
     import logging
 
-    def work():
-        root_logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
+
+    class Worker:
+        def run(self):
+            if ready:
+                logger.info("Starting work")
+
+Getting the root logger solely to inspect it or configure its handlers is allowed:
+
+.. code-block:: python
+
+    import logging
+
+    root_logger = logging.getLogger()
+
+    def configure(handler):
         root_logger.addHandler(handler)
-        logger = logging.getLogger(__name__)
-        logger.info("Starting work")
 
 If logging through the root logger is intentional, ``logging.getLogger(None)`` remains an explicit opt-in that this rule allows.
 
-The analysis is deliberately limited to straightforward cases.
-It does not follow logger values between scopes, through function calls, or through attributes and containers.
-It skips statements inside control-flow blocks (such as ``if``, ``try``, and loops), class bodies, lambdas, and comprehensions.
-Assignments in skipped blocks invalidate tracked bindings, so uncertain cases can be missed rather than reported incorrectly.
+The analysis is deliberately conservative.
+Cross-scope checks require a module name with exactly one binding and no ``global`` declaration anywhere in the module.
+Deferred function bodies are checked against the completed module bindings; multiple assignments, deletion, or conditional rebinding disable cross-scope tracking of that name.
+Local parameters, imports, and assignments shadow module bindings, even if the assignment occurs after a logging call.
+Class attributes do not shadow bare module names inside methods.
+
+Stable module loggers can be checked inside control-flow blocks such as ``if``, ``try``, and loops.
+For locally assigned loggers, these blocks still invalidate any bindings they might replace and logging calls inside them are skipped.
+The rule does not trace values passed to other functions, captured from enclosing function locals, or stored in attributes and containers.
+Class-body expressions, lambdas, comprehensions, and function or class definitions inside control-flow blocks are not analyzed.

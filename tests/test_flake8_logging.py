@@ -2193,6 +2193,343 @@ class TestLOG016:
         ) == [(5, 4, "LOG016 avoid logging through an implicitly obtained root logger")]
 
 
+class TestLOG016ModuleBindings:
+    @pytest.mark.parametrize(
+        ("body", "line", "column"),
+        [
+            ("def work():\n    logger.info(...)", 4, 4),
+            ("async def work():\n    logger.info(...)", 4, 4),
+            ("class Worker:\n    def work(self):\n        logger.info(...)", 5, 8),
+            (
+                "class Worker:\n    async def work(self):\n        logger.info(...)",
+                5,
+                8,
+            ),
+            (
+                "class Worker:\n    @staticmethod\n    def work():\n        logger.info(...)",
+                6,
+                8,
+            ),
+            (
+                "class Worker:\n    @classmethod\n    def work(cls):\n        logger.info(...)",
+                6,
+                8,
+            ),
+            (
+                "class Outer:\n    class Worker:\n        def work(self):\n            logger.info(...)",
+                6,
+                12,
+            ),
+        ],
+    )
+    def test_module_logger_used_in_deferred_body(self, body, line, column):
+        results = run(f"import logging\nlogger = logging.getLogger()\n{body}")
+        assert results == [
+            (
+                line,
+                column,
+                "LOG016 avoid logging through an implicitly obtained root logger",
+            )
+        ]
+
+    @pytest.mark.parametrize("arguments", ["__name__", "None", "name=None"])
+    def test_named_or_explicit_root_logger(self, arguments):
+        results = run(
+            f"""\
+            import logging
+            logger = logging.getLogger({arguments})
+            class Worker:
+                def work(self):
+                    logger.info(...)
+            """
+        )
+        assert results == []
+
+    def test_configuration_only(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            class Worker:
+                def configure(self, handler):
+                    logger.addHandler(handler)
+                    logger.setLevel(logging.INFO)
+                    print(logger.handlers)
+            """
+        )
+        assert results == []
+
+    @pytest.mark.parametrize(
+        "definition",
+        [
+            "def work(self, logger):\n        logger.info(...)",
+            "def work(self):\n        logger = logging.getLogger(__name__)\n        logger.info(...)",
+            "def work(self):\n        logger.info(...)\n        logger = other",
+            "def work(self):\n        logger: object\n        logger.info(...)",
+            "def work(self):\n        from elsewhere import logger\n        logger.info(...)",
+            "def work(self):\n        for logger in others:\n            pass\n        logger.info(...)",
+        ],
+    )
+    def test_method_local_shadowing(self, definition):
+        results = run(
+            f"import logging\nlogger = logging.getLogger()\nclass Worker:\n    {definition}"
+        )
+        assert results == []
+
+    def test_class_attribute_does_not_shadow_module_name(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            class Worker:
+                logger = logging.getLogger(__name__)
+                def work(self):
+                    logger.info(...)
+                    self.logger.info(...)
+            """
+        )
+        assert results == [
+            (6, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    def test_class_root_does_not_become_module_binding(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger(__name__)
+            class Worker:
+                logger = logging.getLogger()
+                def work(self):
+                    logger.info(...)
+                    self.logger.info(...)
+            """
+        )
+        assert results == []
+
+    def test_method_named_logger_does_not_shadow_module_name(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            class Worker:
+                def logger(self):
+                    logger.info(...)
+            """
+        )
+        assert results == [
+            (5, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    def test_module_alias(self):
+        results = run(
+            """\
+            from logging import getLogger as get_logger
+            root = get_logger()
+            logger = root
+            class Worker:
+                def work(self):
+                    logger.info(...)
+            """
+        )
+        assert results == [
+            (6, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    def test_sibling_methods_have_independent_locals(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            class Worker:
+                def first(self):
+                    logger = logging.getLogger(__name__)
+                    logger.info(...)
+                def second(self):
+                    logger.info(...)
+            """
+        )
+        assert results == [
+            (8, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    def test_assignment_after_class_definition(self):
+        results = run(
+            """\
+            import logging
+            class Worker:
+                def work(self):
+                    logger.info(...)
+            logger = logging.getLogger()
+            """
+        )
+        assert results == [
+            (4, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    @pytest.mark.parametrize(
+        "replacement",
+        [
+            "logger = logging.getLogger(__name__)",
+            "logger = logging.getLogger()",
+            "del logger",
+            "if condition:\n    logger = other",
+            "def logger():\n    pass",
+            "class logger:\n    pass",
+            "def replace():\n    global logger\n    logger = other",
+        ],
+    )
+    def test_module_reassignment_after_class_definition(self, replacement):
+        results = run(
+            f"import logging\nlogger = logging.getLogger()\nclass Worker:\n    def work(self):\n        logger.info(...)\n{replacement}"
+        )
+        assert results == []
+
+    def test_module_reassignment_before_root_assignment(self):
+        results = run(
+            """\
+            import logging
+            logger = other
+            def work():
+                logger.info(...)
+            logger = logging.getLogger()
+            """
+        )
+        assert results == []
+
+    def test_class_definition_expressions_invalidate_module_bindings(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            @decorate
+            class Worker(Base, metaclass=(logger := other)):
+                def work(self):
+                    logger.info(...)
+            """
+        )
+        assert results == []
+
+    def test_function_defaults_invalidate_module_bindings(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            def work(value=(logger := other), *, required):
+                logger.info(...)
+            """
+        )
+        assert results == []
+
+    def test_local_root_logger_in_method(self):
+        results = run(
+            """\
+            import logging
+            class Worker:
+                def work(self):
+                    logger = logging.getLogger()
+                    logger.info(...)
+            """
+        )
+        assert results == [
+            (5, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    def test_class_body_remains_unchecked(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            class Worker:
+                logger.info(...)
+            """
+        )
+        assert results == []
+
+    @pytest.mark.parametrize(
+        ("body", "line", "column"),
+        [
+            ("if ready:\n            logger.info(...)", 6, 12),
+            ("for item in items:\n            logger.info(...)", 6, 12),
+            (
+                "try:\n            perform()\n        except Exception:\n            logger.exception(...)",
+                8,
+                12,
+            ),
+            ("with context():\n            logger.info(...)", 6, 12),
+            ("while ready:\n            logger.info(...)", 6, 12),
+        ],
+    )
+    def test_module_logger_inside_method_control_flow(self, body, line, column):
+        results = run(
+            f"import logging\nlogger = logging.getLogger()\nclass Worker:\n    def work(self):\n        {body}"
+        )
+        assert results == [
+            (
+                line,
+                column,
+                "LOG016 avoid logging through an implicitly obtained root logger",
+            )
+        ]
+
+    def test_module_logger_aliased_in_method(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            class Worker:
+                def work(self):
+                    local_logger = logger
+                    local_logger.info(...)
+            """
+        )
+        assert results == [
+            (6, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    def test_nested_function_can_use_stable_module_logger(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            def outer():
+                def inner():
+                    logger.info(...)
+            """
+        )
+        assert results == [
+            (5, 8, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
+
+    def test_skipped_control_flow_does_not_enter_nested_scopes(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            def work():
+                if ready:
+                    def callback():
+                        logger.info(...)
+                    class Inner:
+                        logger.info(...)
+            """
+        )
+        assert results == []
+
+    def test_conditional_local_binding_shadows_module_logger(self):
+        results = run(
+            """\
+            import logging
+            logger = logging.getLogger()
+            class Worker:
+                def work(self):
+                    if ready:
+                        logger = other
+                    logger.info(...)
+            """
+        )
+        assert results == []
+
+
 class TestFlattenStrChain:
     def run(self, source: str) -> str | None:
         tree = ast.parse(dedent(source))

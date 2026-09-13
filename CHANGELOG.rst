@@ -5,7 +5,8 @@ Changelog
 Unreleased
 ----------
 
-* Add an experimental LOG016 rule that detects logging through variables assigned from argument-free ``logging.getLogger()`` calls in the same scope.
+* Add an experimental LOG016 rule that detects logging through variables assigned from argument-free ``logging.getLogger()`` calls.
+  This includes unambiguous module-level loggers used in functions and class methods, with local shadowing respected.
   Getting the root logger solely to inspect or configure it is allowed.
   Use ``logging.getLogger(__name__)`` for logging, or ``logging.getLogger(None)`` to explicitly opt in to root logging.
 

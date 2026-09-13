@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 
 
 def bound_names(node: ast.AST) -> set[str]:
@@ -26,17 +27,79 @@ def bound_names(node: ast.AST) -> set[str]:
 
 
 class RootLoggerVisitor(ast.NodeVisitor):
-    """Track definite root loggers through straight-line statements in one scope."""
+    """Track local root loggers and unambiguous module bindings used in functions."""
 
     def __init__(self, logger_methods: frozenset[str]) -> None:
         self.errors: list[tuple[int, int]] = []
         self._logger_methods = logger_methods
         self._bindings: dict[str, str] = {}
+        self._module_functions: list[ast.FunctionDef | ast.AsyncFunctionDef] = []
 
     def visit_Module(self, node: ast.Module) -> None:
-        self._visit_body(node.body)
+        # Deferred bodies see module globals, not their values at definition time.
+        # Only inherit names with a single module binding and no global declaration.
+        writes: Counter[str] = Counter()
+        for statement in node.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                writes.update([statement.name])
+                expressions = [
+                    *statement.decorator_list,
+                    *statement.args.defaults,
+                    *statement.args.kw_defaults,
+                ]
+            elif isinstance(statement, ast.ClassDef):
+                writes.update([statement.name])
+                expressions = [
+                    *statement.decorator_list,
+                    *statement.bases,
+                    *(keyword.value for keyword in statement.keywords),
+                ]
+            else:
+                writes.update(bound_names(statement))
+                expressions = []
+            for expression in expressions:
+                if expression is not None:
+                    writes.update(bound_names(expression))
 
-    def _visit_body(self, body: list[ast.stmt]) -> None:
+        global_names = {
+            name
+            for child in ast.walk(node)
+            if isinstance(child, ast.Global)
+            for name in child.names
+        }
+        self._visit_body(node.body, module_level=True)
+        module_bindings = {
+            name: "module_root" if kind == "root" else kind
+            for name, kind in self._bindings.items()
+            if writes[name] == 1 and name not in global_names
+        }
+        for function in self._module_functions:
+            self._visit_function(function, module_bindings)
+
+    def _visit_function(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+        inherited: dict[str, str],
+    ) -> None:
+        outer_bindings = self._bindings
+        local_names = bound_names(node.args)
+        for statement in node.body:
+            local_names.update(bound_names(statement))
+        self._bindings = {
+            name: kind for name, kind in inherited.items() if name not in local_names
+        }
+        self._visit_body(node.body)
+        self._bindings = outer_bindings
+
+    def _collect_methods(self, node: ast.ClassDef) -> None:
+        # Class attributes do not form an enclosing scope for methods' bare names.
+        for statement in node.body:
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._module_functions.append(statement)
+            elif isinstance(statement, ast.ClassDef):
+                self._collect_methods(statement)
+
+    def _visit_body(self, body: list[ast.stmt], module_level: bool = False) -> None:
         for statement in body:
             if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for expression in (
@@ -47,15 +110,26 @@ class RootLoggerVisitor(ast.NodeVisitor):
                     if expression is not None:
                         self._forget_bindings(expression)
                         self.visit(expression)
-                outer_bindings = self._bindings
-                local_names = bound_names(statement)
-                self._bindings = {
-                    name: kind
-                    for name, kind in outer_bindings.items()
-                    if kind != "root" and name not in local_names
-                }
-                self._visit_body(statement.body)
-                self._bindings = outer_bindings
+                if module_level:
+                    self._module_functions.append(statement)
+                else:
+                    self._visit_function(
+                        statement,
+                        {
+                            name: kind
+                            for name, kind in self._bindings.items()
+                            if kind != "root"
+                        },
+                    )
+                self._bindings.pop(statement.name, None)
+            elif isinstance(statement, ast.ClassDef) and module_level:
+                self._collect_methods(statement)
+                for expression in (
+                    *statement.decorator_list,
+                    *statement.bases,
+                    *(keyword.value for keyword in statement.keywords),
+                ):
+                    self._forget_bindings(expression)
                 self._bindings.pop(statement.name, None)
             elif isinstance(statement, (ast.Import, ast.ImportFrom)):
                 for alias in statement.names:
@@ -88,15 +162,26 @@ class RootLoggerVisitor(ast.NodeVisitor):
                 for target in targets:
                     self._forget_bindings(target)
                     if isinstance(target, ast.Name) and kind is not None:
-                        self._bindings[target.id] = kind
+                        self._bindings[target.id] = (
+                            "root" if kind == "module_root" else kind
+                        )
             else:
                 self._forget_bindings(statement)
-                # Skip control flow and class bodies: AST order is not execution
-                # order. Still forget bindings they might replace before moving on.
-                if not any(
+                # Within control flow, only module roots that cannot be locally
+                # rebound are safe to check without following execution order.
+                if any(
                     isinstance(child, (ast.stmt, ast.ExceptHandler, ast.match_case))
                     for child in ast.iter_child_nodes(statement)
                 ):
+                    outer_bindings = self._bindings
+                    self._bindings = {
+                        name: kind
+                        for name, kind in outer_bindings.items()
+                        if kind == "module_root"
+                    }
+                    self.visit(statement)
+                    self._bindings = outer_bindings
+                else:
                     self.visit(statement)
                 if isinstance(
                     statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)
@@ -134,7 +219,7 @@ class RootLoggerVisitor(ast.NodeVisitor):
             isinstance(node.func, ast.Attribute)
             and node.func.attr in self._logger_methods
             and isinstance(node.func.value, ast.Name)
-            and self._bindings.get(node.func.value.id) == "root"
+            and self._bindings.get(node.func.value.id) in ("root", "module_root")
         ):
             self.errors.append((node.lineno, node.col_offset))
         self.generic_visit(node)
@@ -147,3 +232,6 @@ class RootLoggerVisitor(ast.NodeVisitor):
     visit_SetComp = visit_Lambda
     visit_DictComp = visit_Lambda
     visit_GeneratorExp = visit_Lambda
+    visit_FunctionDef = visit_Lambda
+    visit_AsyncFunctionDef = visit_Lambda
+    visit_ClassDef = visit_Lambda
