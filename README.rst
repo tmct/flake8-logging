@@ -610,9 +610,11 @@ Getting that logger to inspect it or configure its handlers is legitimate.
 Logging through it, however, leaves messages without a module-specific logger name.
 
 This experimental rule detects a variable assigned from ``logging.getLogger()`` and subsequently used to log.
-It checks straightforward uses within one scope, and module-level loggers used in functions and class methods, including async functions, static methods, and class methods.
+It follows lexical bindings within one file: module code, functions, methods, nested functions, class bodies, lambdas, and comprehensions.
+This includes async forms and definitions inside conditional, loop, and exception-handling blocks.
 It reports the logging call, not the assignment.
-Simple aliases, chained assignments, and annotated assignments are supported.
+Simple aliases, chained and annotated assignments, assignment expressions, and aliases of logging methods are supported.
+Direct calls such as ``logging.getLogger().info(...)`` are also detected.
 Reassigning a variable to a named logger or an unknown value stops tracking it as a root logger.
 
 Failing example:
@@ -654,13 +656,32 @@ Getting the root logger solely to inspect it or configure its handlers is allowe
 
 If logging through the root logger is intentional, ``logging.getLogger(None)`` remains an explicit opt-in that this rule allows.
 
-The analysis is deliberately conservative.
-Cross-scope checks require a module name with exactly one binding and no ``global`` declaration anywhere in the module.
-Deferred function bodies are checked against the completed module bindings; multiple assignments, deletion, or conditional rebinding disable cross-scope tracking of that name.
-Local parameters, imports, and assignments shadow module bindings, even if the assignment occurs after a logging call.
-Class attributes do not shadow bare module names inside methods.
+A locally created root logger captured by a nested function is also detected:
 
-Stable module loggers can be checked inside control-flow blocks such as ``if``, ``try``, and loops.
-For locally assigned loggers, these blocks still invalidate any bindings they might replace and logging calls inside them are skipped.
-The rule does not trace values passed to other functions, captured from enclosing function locals, or stored in attributes and containers.
-Class-body expressions, lambdas, comprehensions, and function or class definitions inside control-flow blocks are not analyzed.
+.. code-block:: python
+
+    import logging
+
+    def make_worker():
+        logger = logging.getLogger()
+
+        def work():
+            logger.info("Starting work")  # LOG016.
+
+        return work
+
+The analysis respects Python’s lexical scopes.
+Parameters, local assignments, imports, exception captures, and pattern captures shadow enclosing names.
+Class attributes do not form an enclosing namespace for methods, and comprehension targets do not leak into surrounding scopes.
+Read-only ``global`` and ``nonlocal`` references resolve to the corresponding enclosing binding.
+
+The analysis is deliberately conservative about execution order.
+Immediate code uses the current bindings, while deferred functions, lambdas, and generator bodies inherit only bindings with a single unambiguous assignment in the enclosing scope.
+Multiple assignments, deletion, uncertain control flow, wildcard imports, and writes through ``global`` or ``nonlocal`` can prevent a binding from being tracked into deferred code.
+Branches keep a known value only when their results agree; loop and exception paths discard values that could have changed.
+These choices may miss some logging calls rather than assume a logger’s identity when it is uncertain.
+
+The boundary is one file and lexical bindings.
+The rule does not infer arguments or return values across arbitrary function calls, follow logger values imported from another file, or track values stored in object attributes and containers.
+It does not execute code or evaluate lazy type annotations and type aliases.
+Getting an explicit root logger with ``getLogger(None)`` remains allowed in every scope.

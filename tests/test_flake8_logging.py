@@ -2124,10 +2124,9 @@ class TestLOG016:
         )
 
     @pytest.mark.parametrize("declaration", ["global root", "nonlocal root"])
-    def test_external_bindings_are_not_inherited(self, declaration):
-        assert (
-            run(
-                f"""\
+    def test_external_binding_resolution(self, declaration):
+        assert run(
+            f"""\
             import logging
             def outer():
                 root = logging.getLogger()
@@ -2135,8 +2134,10 @@ class TestLOG016:
                     {declaration}
                     root.info(...)
             """
-            )
-            == []
+        ) == (
+            [(6, 8, "LOG016 avoid logging through an implicitly obtained root logger")]
+            if declaration == "nonlocal root"
+            else []
         )
 
     def test_match_mapping_rebinds_root(self):
@@ -2434,7 +2435,7 @@ class TestLOG016ModuleBindings:
             (5, 8, "LOG016 avoid logging through an implicitly obtained root logger")
         ]
 
-    def test_class_body_remains_unchecked(self):
+    def test_class_body_logging(self):
         results = run(
             """\
             import logging
@@ -2443,7 +2444,9 @@ class TestLOG016ModuleBindings:
                 logger.info(...)
             """
         )
-        assert results == []
+        assert results == [
+            (4, 4, "LOG016 avoid logging through an implicitly obtained root logger")
+        ]
 
     @pytest.mark.parametrize(
         ("body", "line", "column"),
@@ -2500,7 +2503,7 @@ class TestLOG016ModuleBindings:
             (5, 8, "LOG016 avoid logging through an implicitly obtained root logger")
         ]
 
-    def test_skipped_control_flow_does_not_enter_nested_scopes(self):
+    def test_control_flow_enters_nested_scopes(self):
         results = run(
             """\
             import logging
@@ -2513,7 +2516,10 @@ class TestLOG016ModuleBindings:
                         logger.info(...)
             """
         )
-        assert results == []
+        assert results == [
+            (6, 12, "LOG016 avoid logging through an implicitly obtained root logger"),
+            (8, 12, "LOG016 avoid logging through an implicitly obtained root logger"),
+        ]
 
     def test_conditional_local_binding_shadows_module_logger(self):
         results = run(
